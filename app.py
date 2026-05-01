@@ -1,17 +1,39 @@
 import pandas as pd
-from fastapi import FastAPI
-from matplotlib.lines import lineStyles
-
+from fastapi import FastAPI, Depends
 from extractor import fetch_latest_launch
 from analyzer import calculate_sentiment
 import matplotlib.pyplot as plt
 import io
 from fastapi.responses import StreamingResponse
+from database import engine, Base, SessionLocal, LaunchDB
+from sqlalchemy.orm import Session
+
+Base.metadata.create_all(bind=engine)
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+def interpret_sentiment(score: float) -> str:
+        if score > 0.5:
+            return "Excellent"
+        elif score > 0:
+            return "Good"
+        elif score == 0:
+            return "Neutral"
+        elif score > -0.5:
+            return "Bad"
+        else:
+            return "Very Bad"
 
 app = FastAPI()
 
 @app.get("/analyze")
-def get_spacex_analysis():
+def get_spacex_analysis(db: Session = Depends(get_db)):
     try:
         raw_data = fetch_latest_launch()
         df = pd.DataFrame(raw_data)
@@ -23,9 +45,21 @@ def get_spacex_analysis():
         df['details'] = df['details'].str.strip()
 
         df['sentiment'] = df['details'].apply(calculate_sentiment)
+        df['sentiment_label'] = df['sentiment'].apply(interpret_sentiment)
 
-        df_final = df[['name', 'details', 'success', 'sentiment', ]].tail(10)
+        df_final = df[['name', 'details', 'success', 'sentiment', 'sentiment_label']].tail(30)
 
+        for index, row in df_final.iterrows():
+            db_launch = LaunchDB(
+                name=row['name'],
+                details=row['details'],
+                success=bool(row['success']),
+                sentiment=float(row['sentiment']),
+                sentiment_label=str(row['sentiment_label'])
+            )
+            db.add(db_launch)
+
+        db.commit()
         return df_final.to_dict(orient='records')
 
     except Exception as e:
@@ -85,4 +119,3 @@ def get_spaces_chart():
 
     except Exception as e:
         return {"error": str(e)}
-
