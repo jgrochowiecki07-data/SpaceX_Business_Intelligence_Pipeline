@@ -22,3 +22,14 @@ class LaunchDB(Base):
     success = Column(Boolean)
     created_time=Column(DateTime, default=datetime.utcnow)
 
+class LaunchErrorDB(Base):
+    __tablename__ = "launch_error"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String)
+    sentiment = Column(Float, nullable=True)
+    sentiment_label = Column(String, nullable=True)
+    details = Column(String)
+    success = Column(Boolean)
+    created_time = Column(DateTime, default=datetime.utcnow)
+    error_message = Column(String)
+    raw_data = Column(String)

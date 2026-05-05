@@ -5,8 +5,9 @@ from analyzer import calculate_sentiment
 import matplotlib.pyplot as plt
 import io
 from fastapi.responses import StreamingResponse
-from database import engine, Base, SessionLocal, LaunchDB
+from database import engine, Base, SessionLocal, LaunchDB, LaunchErrorDB
 from sqlalchemy.orm import Session
+import time
 
 Base.metadata.create_all(bind=engine)
 
@@ -32,6 +33,7 @@ def interpret_sentiment(score: float) -> str:
 
 app = FastAPI()
 
+
 @app.get("/analyze")
 def get_spacex_analysis(db: Session = Depends(get_db)):
     try:
@@ -39,31 +41,58 @@ def get_spacex_analysis(db: Session = Depends(get_db)):
         df = pd.DataFrame(raw_data)
 
         if 'details' not in df.columns:
-            return {"error": "Missing 'details' column in API response", "available_columns": list(df.columns)}
+            return {"error": "Missing 'details' column in API response"}
 
         df = df.dropna(subset=['details'])
         df['details'] = df['details'].str.strip()
 
-        df['sentiment'] = df['details'].apply(calculate_sentiment)
-        df['sentiment_label'] = df['sentiment'].apply(interpret_sentiment)
-
-        df_final = df[['name', 'details', 'success', 'sentiment', 'sentiment_label']].tail(30)
+        df_final = df.tail(10)
 
         for index, row in df_final.iterrows():
-            db_launch = LaunchDB(
-                name=row['name'],
-                details=row['details'],
-                success=bool(row['success']),
-                sentiment=float(row['sentiment']),
-                sentiment_label=str(row['sentiment_label'])
-            )
-            db.add(db_launch)
+            attempts = 3
+            success_processing = False
+            last_error = ""
 
-        db.commit()
-        return df_final.to_dict(orient='records')
+            while attempts > 0 and not success_processing:
+                try:
+                    sentiment_score = calculate_sentiment(row['details'])
+                    label = interpret_sentiment(sentiment_score)
+
+                    db_launch = LaunchDB(
+                        name=row['name'],
+                        details=row['details'],
+                        success=bool(row['success']),
+                        sentiment=float(sentiment_score),
+                        sentiment_label=str(label)
+                    )
+                    db.add(db_launch)
+                    db.commit()
+                    success_processing = True
+
+                except Exception as e:
+                    db.rollback()
+                    attempts -= 1
+                    last_error = str(e)
+                    print(f"Próba nieudana dla {row['name']}. Zostało prób: {attempts}")
+                    import time
+                    time.sleep(1)
+
+            if not success_processing:
+                error_entry = LaunchErrorDB(
+                    name=row['name'],
+                    details=row['details'],
+                    success=bool(row['success']),
+                    error_message=last_error,
+                    raw_data=str(row.to_json())
+                )
+                db.add(error_entry)
+                db.commit()
+                print(f"Zapisano błąd dla misji: {row['name']}")
+
+        return {"status": "Success", "processed_records": len(df_final)}
 
     except Exception as e:
-        return f"Error: {str(e)}"
+        return {"global_error": str(e)}
 
 @app.get("/stats")
 def get_spaces_stats():
