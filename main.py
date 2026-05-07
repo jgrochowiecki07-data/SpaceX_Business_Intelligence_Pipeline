@@ -12,7 +12,7 @@ def run_pipeline():
 
     try:
         mission = LaunchData(**raw_data, sentiment_score=sentiment)
-        print("Success")
+        print("Success Process is Running")
         print(mission.model_dump_json(indent=4))
         return mission
 

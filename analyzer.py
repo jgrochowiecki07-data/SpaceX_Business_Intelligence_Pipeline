@@ -1,4 +1,5 @@
 from transformers import pipeline
+# Wdrożenie Systemu AI który mi ocenia na podstawie wrzuconych przez spaceX misji czy misja była dobra czy nie od -1 do 1
 
 classifier = pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")
 
